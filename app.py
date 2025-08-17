@@ -4,186 +4,491 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores import Chroma
 from langchain.embeddings import SentenceTransformerEmbeddings
 from langchain.llms import Ollama
+from langchain.schema import Document
+import re
+import hashlib
+import io
+import uuid
+import shutil
 import os
 
 st.title("Copiloto Conversacional sobre PDFs - Día 2 (Llama3) con Resumen y Tipo de Documento")
 
-# Inicializar variables en session_state (solo durante la sesión actual)
+# ===========================
+# Config persistencia Chroma
+# ===========================
+CHROMA_PERSIST_DIR = ""  # "", None => in-memory | "chroma_db" => persistente
+
+# ---------------------------
+# Estado de sesión inicial
+# ---------------------------
 if 'pdf_chunks' not in st.session_state:
-    st.session_state.pdf_chunks = []
+    st.session_state.pdf_chunks = []           # lista de Document
 if 'vectorstore' not in st.session_state:
     st.session_state.vectorstore = None
-if 'processed_files' not in st.session_state:
-    st.session_state.processed_files = []
-# Inicializar historial del chat
+if 'embeddings' not in st.session_state:
+    st.session_state.embeddings = None
+if 'processed_hashes' not in st.session_state:
+    st.session_state.processed_hashes = set()  # hashes md5 ya procesados
 if 'chat_messages' not in st.session_state:
     st.session_state.chat_messages = []
+if 'summaries' not in st.session_state:
+    # {label, filename, filehash, summary}
+    st.session_state.summaries = []
+if 'collection_name' not in st.session_state:
+    st.session_state.collection_name = f"langchain-{uuid.uuid4().hex[:8]}"
+if 'doc_ids_by_filehash' not in st.session_state:
+    st.session_state.doc_ids_by_filehash = {}  # filehash -> [ids en Chroma]
+if 'uploader_key' not in st.session_state:
+    st.session_state.uploader_key = f"uploader-{uuid.uuid4().hex[:6]}"
+
+# ===========================
+# Funciones de mantenimiento
+# ===========================
+
+
+def remove_file_by_hash(filehash: str):
+    """Elimina TODO rastro del archivo identificado por 'filehash'."""
+    # 1) Borrar del vectorstore por IDs o por metadatos
+    try:
+        vs = st.session_state.get("vectorstore")
+        ids = st.session_state.doc_ids_by_filehash.get(filehash, [])
+        if vs is not None:
+            if ids:
+                try:
+                    vs.delete(ids=ids)
+                except Exception:
+                    pass
+            else:
+                try:
+                    vs.delete(where={"filehash": filehash})
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    # 2) Borrar de memoria: pdf_chunks
+    st.session_state.pdf_chunks = [
+        d for d in st.session_state.pdf_chunks
+        if d.metadata.get("filehash") != filehash
+    ]
+
+    # 3) Borrar de summaries
+    st.session_state.summaries = [
+        s for s in st.session_state.summaries
+        if s.get("filehash") != filehash
+    ]
+
+    # 4) Borrar índices auxiliares
+    st.session_state.processed_hashes.discard(filehash)
+    st.session_state.doc_ids_by_filehash.pop(filehash, None)
+
+
+def remove_all_files_one_by_one():
+    """Elimina uno por uno todos los archivos procesados."""
+    for fh in list(st.session_state.processed_hashes):
+        remove_file_by_hash(fh)
+
+
+# ===========================
+# SIDEBAR: Uploader + Reset
+# ===========================
+with st.sidebar:
+    st.markdown("### 📥 Sube hasta 5 PDFs")
+    uploaded_files = st.file_uploader(
+        "Arrastra aquí tus archivos",
+        type="pdf",
+        accept_multiple_files=True,
+        label_visibility="collapsed",
+        key=st.session_state.uploader_key  # <- clave para poder resetear el widget
+    )
+    st.caption("Límite 200 MB por archivo · PDF")
+
+    st.divider()
+
+    if st.button("🔄 Reiniciar sesión", use_container_width=True):
+        # 1) Eliminar uno a uno archivos del índice/memoria
+        remove_all_files_one_by_one()
+
+        # 2) Borrar colección completa si existe (por seguridad)
+        try:
+            vs = st.session_state.get("vectorstore")
+            col_name = st.session_state.get("collection_name")
+            if vs is not None and col_name:
+                try:
+                    vs._client.delete_collection(name=col_name)
+                except Exception:
+                    try:
+                        coll = vs._client.get_collection(name=col_name)
+                        vs._client.delete_collection(name=coll.name)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        # 3) Si hay persistencia, borrar carpeta
+        try:
+            if CHROMA_PERSIST_DIR:
+                if os.path.isdir(CHROMA_PERSIST_DIR):
+                    shutil.rmtree(CHROMA_PERSIST_DIR, ignore_errors=True)
+        except Exception:
+            pass
+
+        # 4) Limpiar estado restante
+        st.session_state.vectorstore = None
+        st.session_state.embeddings = None
+        st.session_state.chat_messages = []
+        st.session_state.collection_name = f"langchain-{uuid.uuid4().hex[:8]}"
+
+        # 5) IMPORTANTÍSIMO: regenerar key del uploader para vaciar la lista visual
+        st.session_state.uploader_key = f"uploader-{uuid.uuid4().hex[:6]}"
+
+        st.rerun()
 
 # Inicializar Llama3 local
 llm = Ollama(model="llama3", temperature=0.1)
 
-# Subida de PDFs
-uploaded_files = st.file_uploader(
-    "Sube hasta 5 PDFs", type="pdf", accept_multiple_files=True)
+# ---------------------------
+# Utilidades
+# ---------------------------
 
-# Procesar solo archivos nuevos (no procesados anteriormente)
+
+def detect_document_type(text: str, filename: str) -> str:
+    patterns = {
+        'guion_pelicula': [
+            r'\b(int\.|ext\.|int/|ext/|noche|día|night|day|morning|evening)\b',
+            r'(fade in:|fade out\.|cut to:|dissolve to:|escena|scene|acto|act)',
+            r'^[A-Z][A-Z0-9\s\-\'\.]{2,}$',
+            r'\([^)]+\)',
+            r'(screenplay|guion|script|dialogue|diálogo|personaje|voz en off|v\.o\.|o\.s\.)'
+        ],
+        'articulo_academico': [
+            r'\b(abstract|resumen|introduction|introducción|conclusion|conclusión)\b',
+            r'\b(references|bibliography|bibliografía|citation|cita)\b',
+            r'\b(methodology|metodología|results|resultados|discussion|discusión)\b'
+        ],
+        'informe_tecnico': [
+            r'\b(executive summary|resumen ejecutivo|technical|técnico)\b',
+            r'\b(specifications|especificaciones|requirements|requisitos)\b',
+            r'\b(implementation|implementación|deployment|despliegue)\b'
+        ],
+        'curriculum_vitae': [
+            r'\b(experience|experiencia|education|educación|skills|habilidades)\b',
+            r'\b(work history|historial laboral|professional|profesional)\b',
+            r'\b(resume|cv|curriculum|curriculum vitae)\b'
+        ],
+        'manual_instrucciones': [
+            r'\b(step|paso|instruction|instrucción|procedure|procedimiento)\b',
+            r'\b(how to|cómo|tutorial|guide|guía|manual)\b',
+            r'\b(installation|instalación|setup|configuración)\b'
+        ]
+    }
+    flags = re.IGNORECASE | re.MULTILINE
+    scores = {}
+    for doc_type, pattern_list in patterns.items():
+        score = 0
+        for pattern in pattern_list:
+            score += len(re.findall(pattern, text, flags=flags))
+        scores[doc_type] = score
+
+    if scores:
+        detected_type = max(scores, key=scores.get)
+        if scores[detected_type] > 0:
+            return detected_type
+
+    filename_lower = filename.lower()
+    if any(w in filename_lower for w in ['script', 'guion', 'screenplay']):
+        return 'guion_pelicula'
+    if any(w in filename_lower for w in ['cv', 'resume', 'curriculum']):
+        return 'curriculum_vitae'
+    if any(w in filename_lower for w in ['manual', 'guide', 'tutorial']):
+        return 'manual_instrucciones'
+    if any(w in filename_lower for w in ['paper', 'article', 'research']):
+        return 'articulo_academico'
+    return 'documento_general'
+
+
+def create_adaptive_chunks(text: str, doc_type: str, filename: str, filehash: str):
+    if doc_type == 'guion_pelicula':
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=2000, chunk_overlap=300,
+            separators=["\n\n", "\n", ".", "!", "?", " ", ""]
+        )
+    elif doc_type == 'articulo_academico':
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1500, chunk_overlap=200,
+            separators=["\n\n", "\n", ".", "!", "?", " ", ""]
+        )
+    elif doc_type == 'curriculum_vitae':
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=800, chunk_overlap=100,
+            separators=["\n\n", "\n", ".", "!", "?", " ", ""]
+        )
+    else:
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1200, chunk_overlap=200,
+            separators=["\n\n", "\n", ".", "!", "?", " ", ""]
+        )
+
+    basic_chunks = splitter.split_text(text)
+    documents = []
+    for i, chunk in enumerate(basic_chunks):
+        documents.append(
+            Document(
+                page_content=chunk,
+                metadata={
+                    'source': filename,
+                    'filehash': filehash,          # <- para limpieza selectiva
+                    'doc_type': doc_type,
+                    'chunk_id': i,
+                    'chunk_size': len(chunk),
+                    'total_chunks': len(basic_chunks)
+                }
+            )
+        )
+    return documents
+
+
+def create_smart_summary(text: str, doc_type: str, filename: str) -> str:
+    if doc_type == 'guion_pelicula':
+        summary_prompt = f'''Eres un experto en análisis de guiones cinematográficos. 
+Analiza este guion y proporciona:
+
+1. Tipo de documento: Guion cinematográfico
+2. Título/Historia
+3. Género
+4. Resumen de trama (2–3 oraciones)
+5. Personajes principales (3–4)
+6. Estructura (escenas/actos)
+
+Texto del guion:
+{text[:3000]}...
+
+Resumen estructurado:'''
+    elif doc_type == 'articulo_academico':
+        summary_prompt = f'''Eres un experto en análisis de artículos académicos.
+Analiza este artículo y proporciona:
+
+1. Tipo de documento: Artículo académico
+2. Título
+3. Área de estudio
+4. Objetivo
+5. Metodología
+6. Hallazgos clave (2–3)
+
+Texto del artículo:
+{text[:3000]}...
+
+Resumen estructurado:'''
+    elif doc_type == 'curriculum_vitae':
+        summary_prompt = f'''Eres un experto en análisis de currículos.
+Analiza este CV y proporciona:
+
+1. Tipo de documento: Curriculum Vitae
+2. Profesión principal
+3. Años de experiencia
+4. Educación (nivel más alto)
+5. Habilidades clave (3–4)
+6. Perfil profesional (1–2 oraciones)
+
+Texto del CV:
+{text[:3000]}...
+
+Resumen estructurado:'''
+    else:
+        summary_prompt = f'''Eres un asistente que analiza documentos.
+Analiza este documento y proporciona:
+
+1. Tipo de documento
+2. Propósito
+3. Contenido principal
+4. Estructura
+5. Audiencia objetivo
+
+Texto del documento:
+{text[:3000]}...
+
+Resumen estructurado:'''
+    return llm(summary_prompt)
+
+
+def unique_label(base_label: str, existing_labels: set, suffix: str) -> str:
+    label = base_label
+    if label not in existing_labels:
+        return label
+    alt = f"{base_label} ({suffix})"
+    i = 2
+    while alt in existing_labels:
+        alt = f"{base_label} ({suffix}-{i})"
+        i += 1
+    return alt
+
+
+# ---------------------------
+# Subida y procesamiento
+# ---------------------------
 if uploaded_files:
-    new_files = [
-        f for f in uploaded_files if f.name not in st.session_state.processed_files]
+    if st.session_state.embeddings is None:
+        st.session_state.embeddings = SentenceTransformerEmbeddings(
+            model_name="all-MiniLM-L6-v2")
 
-    for pdf_file in new_files:
-        st.subheader(f"Procesando: {pdf_file.name}")
+    # 0) Detectar archivos eliminados con la X (comparando hashes actuales vs procesados)
+    current_hashes = set()
+    for f in uploaded_files:
+        fb = f.getvalue()
+        current_hashes.add(hashlib.md5(fb).hexdigest())
+
+    removed_hashes = st.session_state.processed_hashes - current_hashes
+    for fh in list(removed_hashes):
+        remove_file_by_hash(fh)
+
+    # 1) Procesar nuevos
+    existing_labels = {item['label'] for item in st.session_state.summaries}
+
+    for pdf_file in uploaded_files:
         try:
-            # Extraer texto
-            reader = PdfReader(pdf_file)
+            file_bytes = pdf_file.getvalue()
+            filehash = hashlib.md5(file_bytes).hexdigest()
+
+            if filehash in st.session_state.processed_hashes:
+                continue  # ya indexado
+
+            reader = PdfReader(io.BytesIO(file_bytes))
             full_text = ""
             for page in reader.pages:
                 page_text = page.extract_text()
                 if page_text:
                     full_text += page_text + "\n"
 
-            # Chunking
-            text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=1000,
-                chunk_overlap=200
-            )
-            chunks = text_splitter.split_text(full_text)
-            st.write(f"{len(chunks)} chunks generados del PDF {pdf_file.name}")
+            doc_type = detect_document_type(full_text, pdf_file.name)
+            documents = create_adaptive_chunks(
+                full_text, doc_type, pdf_file.name, filehash)
 
-            # Agregar chunks a la sesión
-            st.session_state.pdf_chunks.extend(chunks)
-            st.session_state.processed_files.append(pdf_file.name)
+            # IDs por chunk para poder borrarlos después
+            ids = [f"{filehash}-{i}" for i in range(len(documents))]
 
-            # --- Resumen automático con identificación de tipo ---
-            summary_prompt = f'''Eres un asistente que analiza documentos y resume su contenido.
-Primero identifica qué tipo de documento es (por ejemplo, curriculum vitae, informe técnico, artículo, etc.).
-Luego, genera un resumen de un párrafo claro y conciso describiendo de qué trata el documento.
+            if st.session_state.vectorstore is None:
+                st.session_state.vectorstore = Chroma.from_documents(
+                    documents,
+                    embedding=st.session_state.embeddings,
+                    collection_name=st.session_state.collection_name,
+                    persist_directory=(CHROMA_PERSIST_DIR or None),
+                    ids=ids
+                )
+            else:
+                st.session_state.vectorstore.add_documents(documents, ids=ids)
+                # if CHROMA_PERSIST_DIR:
+                #     st.session_state.vectorstore.persist()
 
-Texto del PDF:
-{full_text}
+            # Registrar IDs del archivo
+            st.session_state.doc_ids_by_filehash[filehash] = ids
 
-Instrucciones de salida:
-- Comienza indicando el tipo de documento.
-- Luego, un resumen de una sola frase o párrafo.
-- Todo en español.
+            # Guardar en memoria
+            st.session_state.pdf_chunks.extend(documents)
 
-Resumen:'''
-            summary = llm(summary_prompt)
-            st.subheader("Resumen del PDF:")
-            st.write(summary)
+            # Resumen
+            with st.spinner(f"Generando resumen para {pdf_file.name}..."):
+                summary = create_smart_summary(
+                    full_text, doc_type, pdf_file.name)
+
+            # Pestañas
+            label = unique_label(
+                pdf_file.name, existing_labels, suffix=filehash[:6])
+            existing_labels.add(label)
+
+            # Registrar
+            st.session_state.processed_hashes.add(filehash)
+            st.session_state.summaries.append({
+                "label": label,
+                "filename": pdf_file.name,
+                "filehash": filehash,
+                "summary": summary
+            })
 
         except Exception as e:
             st.error(f"No se pudo procesar {pdf_file.name}: {e}")
 
-# Crear vector store solo en memoria (sin persistencia)
-if st.session_state.pdf_chunks and st.session_state.vectorstore is None:
-    embeddings = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
-    # Crear vector store sin persist_directory para que sea temporal
-    st.session_state.vectorstore = Chroma.from_texts(
-        st.session_state.pdf_chunks,
-        embedding=embeddings
-    )
-    st.success(
-        "Chunks guardados en vector store temporal (solo durante esta sesión)")
+# ---------------------------
+# Mostrar pestañas de resúmenes
+# ---------------------------
+if st.session_state.summaries:
+    st.subheader("🤖 Resúmenes Inteligentes")
+    labels = [item["label"] for item in st.session_state.summaries]
+    tabs = st.tabs(labels)
+    for tab, item in zip(tabs, st.session_state.summaries):
+        with tab:
+            st.markdown(f"### 📄 {item['filename']}")
+            st.markdown(item["summary"])
 
-# Mostrar archivos procesados
-if st.session_state.processed_files:
-    st.subheader("Archivos procesados en esta sesión:")
-    for file_name in st.session_state.processed_files:
-        st.write(f"• {file_name}")
-
-# ===== INTERFAZ DE CHAT MODERNA =====
+# ---------------------------
+# Interfaz de chat
+# ---------------------------
 st.markdown("---")
 st.subheader("💬 Chat con el Copiloto")
 
-# Mostrar mensajes del historial del chat
 for message in st.session_state.chat_messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# Mostrar mensaje de bienvenida si no hay archivos procesados
 if not st.session_state.pdf_chunks:
     with st.chat_message("assistant"):
         st.markdown(
-            "👋 ¡Hola! Soy tu copiloto conversacional. Sube algunos PDFs para poder ayudarte a responder preguntas sobre su contenido.")
-
-    # Mostrar mensaje de bloqueo más visible
+            "👋 ¡Hola! Sube algunos PDFs para poder ayudarte a responder preguntas sobre su contenido.")
     st.warning(
-        "⚠️ **No puedes hacer preguntas aún** - Primero debes subir al menos un archivo PDF en la sección superior.")
-
-    # Mostrar ejemplo de lo que se puede hacer
+        "⚠️ **No puedes hacer preguntas aún** - Primero debes subir al menos un archivo PDF en la barra lateral.")
     st.info("""
     **📋 Pasos para comenzar:**
-    1. Sube 1-5 archivos PDF en la sección de arriba
+    1. Sube 1-5 archivos PDF en la barra lateral
     2. Espera a que se procesen los documentos
     3. ¡Listo! Ya podrás hacer preguntas sobre tu contenido
     """)
-
-    # Chat input deshabilitado con mensaje explicativo
     st.chat_input("🚫 Sube PDFs primero para habilitar el chat", disabled=True)
 else:
-    # Input del chat habilitado solo cuando hay archivos
     if prompt := st.chat_input("¡Hola! Pregúntame cualquier cosa sobre tu PDF."):
-        # Verificar que haya archivos procesados (doble verificación)
-        if not st.session_state.pdf_chunks:
-            with st.chat_message("assistant"):
-                st.error(
-                    "❌ Primero necesitas subir y procesar algunos PDFs para poder hacer preguntas.")
-        else:
-            # Agregar mensaje del usuario al historial
-            st.session_state.chat_messages.append(
-                {"role": "user", "content": prompt})
+        st.session_state.chat_messages.append(
+            {"role": "user", "content": prompt})
 
-            # Mostrar mensaje del usuario
-            with st.chat_message("user"):
-                st.markdown(prompt)
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
-            # Mostrar mensaje del asistente con spinner
-            with st.chat_message("assistant"):
-                with st.spinner("🤔 Pensando..."):
-                    # Buscar los chunks más relevantes
-                    relevant_chunks = st.session_state.vectorstore.similarity_search(
-                        prompt, k=3)  # top 3 chunks
+        with st.chat_message("assistant"):
+            with st.spinner("🤔 Pensando..."):
+                relevant_chunks = st.session_state.vectorstore.similarity_search(
+                    prompt, k=5)
+                chat_prompt = f'''Eres un asistente experto que responde preguntas sobre documentos PDF. 
+Usa SOLO la información en el CONTEXTO proporcionado.
 
-                    # Construir prompt con citas y bullets
-                    chat_prompt = f'''Eres un asistente que responde preguntas sobre documentos PDF. 
-Usa SOLO la información en el CONTEXTO y cita la información indicando de qué chunk proviene.
-
-Instrucciones:
-- Responde en español.
-- Usa bullets para cada afirmación.
-- Si la información se repite en varios chunks, haz un resumen.
+Instrucciones específicas:
+- Responde en español de manera clara y estructurada. Si en el documento hay palabras en inglés, debes responder todo en español y traducir las palabras.
+- Usa bullets para organizar la información.
+- Si la información se repite en varios chunks, haz un resumen coherente y humano.
 - Si no hay información suficiente, responde: "No se encontró evidencia en los documentos."
+- Mantén el contexto y la coherencia en tu respuesta.
 
-Pregunta: {prompt}
+Pregunta del usuario: {prompt}
 
-Contexto (chunks relevantes):
+Contexto (chunks relevantes encontrados):
 '''
+                for i, chunk in enumerate(relevant_chunks, 1):
+                    md = chunk.metadata
+                    source_info = f"[Fuente: {md.get('source', 'N/A')} - Chunk {md.get('chunk_id', i)}]"
+                    chat_prompt += f"\n--- CHUNK {i} {source_info} ---\n{chunk.page_content}\n"
+
+                chat_prompt += "\n--- INSTRUCCIONES FINALES ---\nBasándote en el contexto anterior, responde la pregunta del usuario de manera clara, estructurada y simple.\n\nRespuesta:"
+
+                response = llm(chat_prompt)
+                st.markdown(response)
+
+                with st.expander("🔍 Ver contexto usado para esta respuesta"):
                     for i, chunk in enumerate(relevant_chunks, 1):
-                        chat_prompt += f"\nChunk {i}:\n{chunk.page_content}\n"
+                        md = chunk.metadata
+                        st.markdown(
+                            f"**Chunk {i}** - Fuente: {md.get('source', 'N/A')}")
+                        st.markdown(
+                            f"*Tipo: {md.get('doc_type', 'N/A')} | Tamaño: {md.get('chunk_size', 'N/A')} chars*")
+                        st.text(chunk.page_content)
+                        if i < len(relevant_chunks):
+                            st.divider()
 
-                    chat_prompt += "\nRespuesta:"
-
-                    # Obtener respuesta del LLM
-                    response = llm(chat_prompt)
-
-                    # Mostrar la respuesta
-                    st.markdown(response)
-
-                    # Mostrar contexto usado (colapsable)
-                    with st.expander("🔍 Ver contexto usado para esta respuesta"):
-                        for i, chunk in enumerate(relevant_chunks, 1):
-                            st.markdown(f"**Chunk {i}:**")
-                            st.text(chunk.page_content)
-                            if i < len(relevant_chunks):
-                                st.divider()
-
-            # Agregar respuesta del asistente al historial
-            st.session_state.chat_messages.append(
-                {"role": "assistant", "content": response})
-
-# Botón para limpiar el chat (opcional)
-if st.session_state.chat_messages:
-    if st.sidebar.button("🗑️ Limpiar Chat", type="secondary"):
-        st.session_state.chat_messages = []
-        st.rerun()
+        st.session_state.chat_messages.append(
+            {"role": "assistant", "content": response})
