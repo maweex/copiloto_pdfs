@@ -1,9 +1,9 @@
 import streamlit as st
 from PyPDF2 import PdfReader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import Chroma
-from langchain.embeddings import SentenceTransformerEmbeddings
-from langchain.llms import Ollama
+from langchain_community.vectorstores import Chroma
+from langchain_community.embeddings import SentenceTransformerEmbeddings
+from langchain_community.llms import Ollama
 from langchain.schema import Document
 import re
 import hashlib
@@ -11,6 +11,9 @@ import io
 import uuid
 import shutil
 import os
+
+# Prompts externos
+from prompts import build_summary_prompt, build_chat_prompt
 
 st.title("Copiloto Conversacional para PDFs")
 
@@ -63,7 +66,7 @@ def remove_file_by_hash(filehash: str):
 
 
 def remove_all_files_one_by_one():
-    """Elimina uno por uno todos los archivos procesados."""
+    """Elimina uno a uno todos los archivos procesados."""
     for fh in list(st.session_state.get("processed_hashes", set())):
         remove_file_by_hash(fh)
 
@@ -178,7 +181,10 @@ with st.sidebar:
 # ===========================
 # Inicializar Llama3 local
 # ===========================
-llm = Ollama(model="llama3", temperature=0.1)
+ollama_base = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
+ollama_model = os.getenv("OLLAMA_MODEL", "llama3:8b")
+llm = Ollama(model=ollama_model, temperature=0.1, base_url=ollama_base)
+
 
 # ---------------------------
 # Utilidades
@@ -282,66 +288,8 @@ def create_adaptive_chunks(text: str, doc_type: str, filename: str, filehash: st
 
 
 def create_smart_summary(text: str, doc_type: str, filename: str) -> str:
-    if doc_type == 'guion_pelicula':
-        summary_prompt = f'''Eres un experto en análisis de guiones cinematográficos. 
-Analiza este guion y proporciona:
-
-1. Tipo de documento: Guion cinematográfico
-2. Título/Historia
-3. Género
-4. Resumen de trama (2–3 oraciones)
-5. Personajes principales (3–4)
-6. Estructura (escenas/actos)
-
-Texto del guion:
-{text[:3000]}...
-
-Resumen estructurado:'''
-    elif doc_type == 'articulo_academico':
-        summary_prompt = f'''Eres un experto en análisis de artículos académicos.
-Analiza este artículo y proporciona:
-
-1. Tipo de documento: Artículo académico
-2. Título
-3. Área de estudio
-4. Objetivo
-5. Metodología
-6. Hallazgos clave (2–3)
-
-Texto del artículo:
-{text[:3000]}...
-
-Resumen estructurado:'''
-    elif doc_type == 'curriculum_vitae':
-        summary_prompt = f'''Eres un experto en análisis de currículos.
-Analiza este CV y proporciona:
-
-1. Tipo de documento: Curriculum Vitae
-2. Profesión principal
-3. Años de experiencia
-4. Educación (nivel más alto)
-5. Habilidades clave (3–4)
-6. Perfil profesional (1–2 oraciones)
-
-Texto del CV:
-{text[:3000]}...
-
-Resumen estructurado:'''
-    else:
-        summary_prompt = f'''Eres un asistente que analiza documentos.
-Analiza este documento y proporciona:
-
-1. Tipo de documento
-2. Propósito
-3. Contenido principal
-4. Estructura
-5. Audiencia objetivo
-
-Texto del documento:
-{text[:3000]}...
-
-Resumen estructurado:'''
-    return llm(summary_prompt)
+    prompt = build_summary_prompt(text, doc_type)
+    return llm(prompt)
 
 
 def unique_label(base_label: str, existing_labels: set, suffix: str) -> str:
@@ -497,28 +445,9 @@ else:
             with st.spinner("🤔 Pensando..."):
                 relevant_chunks = st.session_state.vectorstore.similarity_search(
                     prompt, k=5)
-                chat_prompt = f'''Eres un asistente experto que responde preguntas sobre documentos PDF. 
-Usa SOLO la información en el CONTEXTO proporcionado.
 
-Instrucciones específicas:
-- Responde en español de manera clara y estructurada. Si en el documento hay palabras en inglés, debes responder todo en español y traducir las palabras.
-- Usa bullets para organizar la información.
-- Si la información se repite en varios chunks, haz un resumen coherente y humano.
-- Si no hay información suficiente, responde: "No se encontró evidencia en los documentos."
-- Mantén el contexto y la coherencia en tu respuesta.
-
-Pregunta del usuario: {prompt}
-
-Contexto (chunks relevantes encontrados):
-'''
-                for i, chunk in enumerate(relevant_chunks, 1):
-                    md = chunk.metadata
-                    source_info = f"[Fuente: {md.get('source', 'N/A')} - Chunk {md.get('chunk_id', i)}]"
-                    chat_prompt += f"\n--- CHUNK {i} {source_info} ---\n{chunk.page_content}\n"
-
-                chat_prompt += "\n--- INSTRUCCIONES FINALES ---\nBasándote en el contexto anterior, responde la pregunta del usuario de manera clara, estructurada y simple.\n\nRespuesta:"
-
-                response = llm(chat_prompt)
+                final_prompt = build_chat_prompt(prompt, relevant_chunks)
+                response = llm(final_prompt)
                 st.markdown(response)
 
                 with st.expander("🔍 Ver contexto usado para esta respuesta"):
