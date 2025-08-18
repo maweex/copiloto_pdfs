@@ -1,0 +1,9 @@
+Para iniciar: 
+    docker compose up -d; Start-Process "http://localhost:8501"
+
+Para detener el proceso: 
+    Apagar los contenedores:
+        docker compose down
+
+    Solo detener los contenedores:
+        docker compose stop

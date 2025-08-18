@@ -1,208 +1,133 @@
-# 📄 Copiloto Conversacional sobre PDFs
+📄 Copiloto Conversacional sobre PDFs
 
 Una aplicación de Streamlit que permite procesar PDFs y hacer preguntas sobre su contenido usando IA local (Ollama) y RAG (Retrieval-Augmented Generation).
 
-## 🚀 Características
+🚀 Características
 
-- **Procesamiento de PDFs**: Extrae texto y crea chunks para análisis
-- **IA Local**: Usa Ollama con el modelo llama3 para procesamiento local
-- **RAG**: Sistema de búsqueda semántica para respuestas contextuales
-- **Interfaz Web**: Aplicación Streamlit fácil de usar
-- **Persistencia**: Almacena embeddings en Chroma DB local
+Procesamiento de PDFs: Extrae texto y crea chunks para análisis
 
-## 📋 Requisitos Previos
+IA Local: Usa Ollama con el modelo llama3 para procesamiento local
 
-- Python 3.8+
-- Ollama instalado y configurado
-- Modelo llama3 descargado
+RAG: Sistema de búsqueda semántica para respuestas contextuales
 
-## 🛠️ Instalación
+Interfaz Web: Aplicación Streamlit fácil de usar
 
-### 1. Clonar el repositorio
+Persistencia opcional: Almacena embeddings en Chroma DB local (puede deshabilitarse)
 
-```bash
-git clone <tu-repositorio>
-cd copiloto_pdfs
-```
+Contenerización: Ejecución con Docker y Docker Compose para un entorno reproducible
 
-### 2. Crear y activar entorno virtual
+📋 Requisitos Previos
+Opción A: Ejecución nativa
 
-#### Windows (PowerShell):
+Python 3.8+
 
-```powershell
-# Crear entorno virtual
-python -m venv venv
+Ollama instalado y configurado
 
-# Activar entorno virtual
-.\venv\Scripts\Activate.ps1
+Modelo llama3 descargado
 
-# O usar el script automático
-.\activate_venv.ps1
-```
+Opción B: Ejecución con Docker
 
-#### Windows (Command Prompt):
+Docker Desktop (Windows/Mac) o Docker Engine (Linux)
 
-```cmd
-# Crear entorno virtual
-python -m venv venv
+Docker Compose plugin
 
-# Activar entorno virtual
-venv\Scripts\activate.bat
+🛠️ Instalación
 
-# O usar el script automático
-activate_venv.bat
-```
+1. Clonar el repositorio
+   git clone <tu-repositorio>
+   cd copiloto_pdfs
 
-#### Linux/Mac:
+🚀 Opción A: Ejecutar localmente con Python 2. Crear y activar entorno virtual
 
-```bash
-# Crear entorno virtual
-python3 -m venv venv
+(ver instrucciones de Windows, Linux/Mac en el archivo original)
 
-# Activar entorno virtual
-source venv/bin/activate
-```
+3. Instalar dependencias
+   pip install -r requirements.txt
 
-### 3. Instalar dependencias
+4. Configurar Ollama
 
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Configurar Ollama
-
-```bash
 # Iniciar servicio Ollama
+
 ollama serve
 
 # Descargar modelo llama3
+
 ollama pull llama3
-```
 
-## 🚀 Uso
+5. Ejecutar la aplicación
+   streamlit run app.py
 
-### 1. Activar entorno virtual
+Abrir navegador en http://localhost:8501
 
-```bash
-# PowerShell
-.\venv\Scripts\Activate.ps1
+🐳 Opción B: Ejecutar con Docker 2. Construir la imagen
+docker compose build
 
-# Command Prompt
-venv\Scripts\activate.bat
+3. Iniciar los contenedores
+   docker compose up -d
 
-# Linux/Mac
-source venv/bin/activate
-```
+Esto levanta:
 
-### 2. Ejecutar la aplicación
+ollama (servidor LLM local en el puerto 11434)
 
-```bash
-streamlit run app.py
-```
+app (la aplicación Streamlit en el puerto 8501)
 
-### 3. Usar la aplicación
+4. Abrir la aplicación
+   http://localhost:8501
 
-1. Abre tu navegador en `http://localhost:8501`
-2. Sube uno o más archivos PDF
-3. Espera a que se procesen y generen resúmenes
-4. Haz preguntas sobre el contenido de los PDFs
+5. Detener la aplicación
+   docker compose down
 
-## 📁 Estructura del Proyecto
-
-```
+📁 Estructura del Proyecto
 copiloto_pdfs/
-├── app.py                 # Aplicación principal de Streamlit
-├── requirements.txt       # Dependencias de Python
-├── activate_venv.bat     # Script de activación para Windows CMD
-├── activate_venv.ps1     # Script de activación para PowerShell
-├── venv/                 # Entorno virtual (se crea automáticamente)
-├── data/                 # Datos persistentes (se crea automáticamente)
-│   └── chroma/          # Base de datos vectorial
-└── README.md            # Este archivo
-```
+├── app.py # Aplicación principal de Streamlit
+├── requirements.txt # Dependencias de Python
+├── Dockerfile # Imagen para la app
+├── docker-compose.yml # Orquestación con Docker
+├── activate_venv.bat # Script de activación (Windows CMD)
+├── activate_venv.ps1 # Script de activación (PowerShell)
+├── venv/ # Entorno virtual (local, no en Docker)
+├── data/ # Datos persistentes (si se habilitan)
+│ └── chroma/ # Base de datos vectorial
+└── README.md # Este archivo
 
-## 🔧 Solución de Problemas
+🔧 Solución de Problemas
+Docker
 
-### Error de conexión a Ollama
+Reconstruir la imagen después de cambios en dependencias:
 
-Si ves el error "HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded":
+docker compose build app
+docker compose up -d
 
-1. **Verifica que Ollama esté ejecutándose:**
+Ver logs en vivo:
 
-   ```bash
-   ollama serve
-   ```
+docker compose logs -f app
 
-2. **Verifica que el modelo esté disponible:**
+Abrir y cerrar rápido la app con un solo comando (Linux/Mac):
 
-   ```bash
-   ollama list
-   ```
+docker compose up -d && xdg-open http://localhost:8501
 
-3. **Si no hay modelos, descarga uno:**
-   ```bash
-   ollama pull llama3
-   ```
+En Windows (PowerShell):
 
-### Problemas con el entorno virtual
+docker compose up -d; Start-Process "http://localhost:8501"
 
-1. **Asegúrate de activar el entorno virtual antes de instalar dependencias:**
+Ollama
 
-   ```bash
-   .\venv\Scripts\Activate.ps1  # PowerShell
-   # o
-   venv\Scripts\activate.bat    # CMD
-   ```
+(conservar las notas de tu README original)
 
-2. **Verifica que estés en el entorno virtual:**
+📚 Dependencias Principales
 
-   - Deberías ver `(venv)` al inicio de tu prompt
+Streamlit: Interfaz web
 
-3. **Si hay problemas, recrea el entorno:**
-   ```bash
-   deactivate
-   rmdir /s venv
-   python -m venv venv
-   .\venv\Scripts\Activate.ps1
-   pip install -r requirements.txt
-   ```
+PyPDF2: Procesamiento de PDFs
 
-## 📚 Dependencias Principales
+LangChain: Framework para aplicaciones de IA
 
-- **Streamlit**: Interfaz web
-- **PyPDF2**: Procesamiento de PDFs
-- **LangChain**: Framework para aplicaciones de IA
-- **ChromaDB**: Base de datos vectorial
-- **Sentence Transformers**: Embeddings de texto
-- **Ollama**: LLM local
+ChromaDB: Base de datos vectorial
 
-## 🤝 Contribuir
+Sentence Transformers: Embeddings de texto
 
-1. Fork el proyecto
-2. Crea una rama para tu feature (`git checkout -b feature/AmazingFeature`)
-3. Commit tus cambios (`git commit -m 'Add some AmazingFeature'`)
-4. Push a la rama (`git push origin feature/AmazingFeature`)
-5. Abre un Pull Request
+Ollama: LLM local
 
-## 📄 Licencia
+Docker + Docker Compose: Orquestación y despliegue
 
-Este proyecto está bajo la Licencia MIT. Ver `LICENSE` para más detalles.
-
-## 🆘 Soporte
-
-Si tienes problemas:
-
-1. Verifica que Ollama esté ejecutándose
-2. Asegúrate de estar en el entorno virtual
-3. Revisa que todas las dependencias estén instaladas
-4. Consulta los logs de error en la consola
-
----
-
-**Nota**: Siempre activa el entorno virtual antes de trabajar en el proyecto:
-
-```bash
-.\venv\Scripts\Activate.ps1  # PowerShell
-# o
-venv\Scripts\activate.bat    # CMD
-```
+👉 ¿Quieres que además te prepare un snippet con comandos rápidos (copiloto-start y copiloto-stop) para que lo pongas en tu README y no tengas que memorizar docker compose up y down?

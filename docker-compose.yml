@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434" # opcional
+    volumes:
+      - ollama_models:/root/.ollama # cachea el modelo descargado
+
+  app:
+    build: .
+    container_name: copiloto-pdfs-app
+    restart: unless-stopped
+    depends_on:
+      - ollama
+    environment:
+      # La app usará Ollama en la red interna de Compose
+      - OLLAMA_HOST=http://ollama:11434
+      - OLLAMA_BASE_URL=http://ollama:11434
+    ports:
+      - "8501:8501"
+
+volumes:
+  ollama_models:

@@ -12,16 +12,129 @@ import uuid
 import shutil
 import os
 
-st.title("Copiloto Conversacional sobre PDFs - Día 2 (Llama3) con Resumen y Tipo de Documento")
+st.title("Copiloto Conversacional para PDFs")
 
 # ===========================
 # Config persistencia Chroma
 # ===========================
-CHROMA_PERSIST_DIR = ""  # "", None => in-memory | "chroma_db" => persistente
+CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", "")
+
+# ===========================
+# Funciones de mantenimiento
+# ===========================
+
+
+def remove_file_by_hash(filehash: str):
+    """Elimina TODO rastro del archivo identificado por 'filehash'."""
+    # 1) Borrar del vectorstore por IDs o por metadatos
+    try:
+        vs = st.session_state.get("vectorstore")
+        ids = st.session_state.get("doc_ids_by_filehash", {}).get(filehash, [])
+        if vs is not None:
+            if ids:
+                try:
+                    vs.delete(ids=ids)
+                except Exception:
+                    pass
+            else:
+                try:
+                    vs.delete(where={"filehash": filehash})
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    # 2) Borrar de memoria: pdf_chunks
+    st.session_state["pdf_chunks"] = [
+        d for d in st.session_state.get("pdf_chunks", [])
+        if d.metadata.get("filehash") != filehash
+    ]
+
+    # 3) Borrar de summaries
+    st.session_state["summaries"] = [
+        s for s in st.session_state.get("summaries", [])
+        if s.get("filehash") != filehash
+    ]
+
+    # 4) Borrar índices auxiliares
+    st.session_state.get("processed_hashes", set()).discard(filehash)
+    if "doc_ids_by_filehash" in st.session_state:
+        st.session_state["doc_ids_by_filehash"].pop(filehash, None)
+
+
+def remove_all_files_one_by_one():
+    """Elimina uno por uno todos los archivos procesados."""
+    for fh in list(st.session_state.get("processed_hashes", set())):
+        remove_file_by_hash(fh)
+
+
+def _delete_chroma_collection_if_possible():
+    """Intenta borrar la colección actual de Chroma (si existe y hay cliente)."""
+    try:
+        vs = st.session_state.get("vectorstore")
+        col_name = st.session_state.get("collection_name")
+        if vs is not None and col_name:
+            try:
+                vs._client.delete_collection(name=col_name)
+            except Exception:
+                try:
+                    coll = vs._client.get_collection(name=col_name)
+                    vs._client.delete_collection(name=coll.name)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
+def _delete_persist_dir_if_configured():
+    """Si hay persistencia configurada, borra el directorio en disco."""
+    try:
+        if CHROMA_PERSIST_DIR:
+            if os.path.isdir(CHROMA_PERSIST_DIR):
+                shutil.rmtree(CHROMA_PERSIST_DIR, ignore_errors=True)
+    except Exception:
+        pass
+
+
+def _reset_core_state(regen_uploader: bool = True):
+    """Limpia claves principales de sesión y regenera IDs auxiliares."""
+    st.session_state["vectorstore"] = None
+    st.session_state["embeddings"] = None
+    st.session_state["chat_messages"] = []
+    st.session_state["pdf_chunks"] = []
+    st.session_state["summaries"] = []
+    st.session_state["processed_hashes"] = set()
+    st.session_state["doc_ids_by_filehash"] = {}
+    st.session_state["collection_name"] = f"langchain-{uuid.uuid4().hex[:8]}"
+    if regen_uploader:
+        st.session_state["uploader_key"] = f"uploader-{uuid.uuid4().hex[:6]}"
+
+
+def _full_reset(regen_uploader: bool = True):
+    """Equivalente al botón: limpia índice, memoria, colección y persistencia."""
+    # 1) Eliminar uno a uno archivos del índice/memoria
+    remove_all_files_one_by_one()
+
+    # 2) Intentar borrar colección
+    _delete_chroma_collection_if_possible()
+
+    # 3) Si hay persistencia, borrar carpeta
+    _delete_persist_dir_if_configured()
+
+    # 4) Limpiar estado base / regenerar uploader
+    _reset_core_state(regen_uploader=regen_uploader)
+
 
 # ---------------------------
 # Estado de sesión inicial
 # ---------------------------
+# Arranque "en limpio" al cargar una sesión nueva (tras refrescar la página)
+if "_fresh_session_initialized" not in st.session_state:
+    # Hace lo mismo que el botón Reiniciar sesión:
+    _full_reset(regen_uploader=True)
+    st.session_state["_fresh_session_initialized"] = True
+
+# Asegurar llaves (por si el usuario modificó el orden del código)
 if 'pdf_chunks' not in st.session_state:
     st.session_state.pdf_chunks = []           # lista de Document
 if 'vectorstore' not in st.session_state:
@@ -43,54 +156,6 @@ if 'uploader_key' not in st.session_state:
     st.session_state.uploader_key = f"uploader-{uuid.uuid4().hex[:6]}"
 
 # ===========================
-# Funciones de mantenimiento
-# ===========================
-
-
-def remove_file_by_hash(filehash: str):
-    """Elimina TODO rastro del archivo identificado por 'filehash'."""
-    # 1) Borrar del vectorstore por IDs o por metadatos
-    try:
-        vs = st.session_state.get("vectorstore")
-        ids = st.session_state.doc_ids_by_filehash.get(filehash, [])
-        if vs is not None:
-            if ids:
-                try:
-                    vs.delete(ids=ids)
-                except Exception:
-                    pass
-            else:
-                try:
-                    vs.delete(where={"filehash": filehash})
-                except Exception:
-                    pass
-    except Exception:
-        pass
-
-    # 2) Borrar de memoria: pdf_chunks
-    st.session_state.pdf_chunks = [
-        d for d in st.session_state.pdf_chunks
-        if d.metadata.get("filehash") != filehash
-    ]
-
-    # 3) Borrar de summaries
-    st.session_state.summaries = [
-        s for s in st.session_state.summaries
-        if s.get("filehash") != filehash
-    ]
-
-    # 4) Borrar índices auxiliares
-    st.session_state.processed_hashes.discard(filehash)
-    st.session_state.doc_ids_by_filehash.pop(filehash, None)
-
-
-def remove_all_files_one_by_one():
-    """Elimina uno por uno todos los archivos procesados."""
-    for fh in list(st.session_state.processed_hashes):
-        remove_file_by_hash(fh)
-
-
-# ===========================
 # SIDEBAR: Uploader + Reset
 # ===========================
 with st.sidebar:
@@ -107,45 +172,12 @@ with st.sidebar:
     st.divider()
 
     if st.button("🔄 Reiniciar sesión", use_container_width=True):
-        # 1) Eliminar uno a uno archivos del índice/memoria
-        remove_all_files_one_by_one()
-
-        # 2) Borrar colección completa si existe (por seguridad)
-        try:
-            vs = st.session_state.get("vectorstore")
-            col_name = st.session_state.get("collection_name")
-            if vs is not None and col_name:
-                try:
-                    vs._client.delete_collection(name=col_name)
-                except Exception:
-                    try:
-                        coll = vs._client.get_collection(name=col_name)
-                        vs._client.delete_collection(name=coll.name)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-
-        # 3) Si hay persistencia, borrar carpeta
-        try:
-            if CHROMA_PERSIST_DIR:
-                if os.path.isdir(CHROMA_PERSIST_DIR):
-                    shutil.rmtree(CHROMA_PERSIST_DIR, ignore_errors=True)
-        except Exception:
-            pass
-
-        # 4) Limpiar estado restante
-        st.session_state.vectorstore = None
-        st.session_state.embeddings = None
-        st.session_state.chat_messages = []
-        st.session_state.collection_name = f"langchain-{uuid.uuid4().hex[:8]}"
-
-        # 5) IMPORTANTÍSIMO: regenerar key del uploader para vaciar la lista visual
-        st.session_state.uploader_key = f"uploader-{uuid.uuid4().hex[:6]}"
-
+        _full_reset(regen_uploader=True)
         st.rerun()
 
+# ===========================
 # Inicializar Llama3 local
+# ===========================
 llm = Ollama(model="llama3", temperature=0.1)
 
 # ---------------------------
@@ -327,10 +359,18 @@ def unique_label(base_label: str, existing_labels: set, suffix: str) -> str:
 # ---------------------------
 # Subida y procesamiento
 # ---------------------------
+with st.sidebar:
+    # 'uploaded_files' ya fue definido arriba en el sidebar
+    pass
+
+if 'uploaded_files' not in locals():
+    uploaded_files = None  # por seguridad
+
 if uploaded_files:
     if st.session_state.embeddings is None:
         st.session_state.embeddings = SentenceTransformerEmbeddings(
-            model_name="all-MiniLM-L6-v2")
+            model_name="all-MiniLM-L6-v2"
+        )
 
     # 0) Detectar archivos eliminados con la X (comparando hashes actuales vs procesados)
     current_hashes = set()
@@ -362,7 +402,8 @@ if uploaded_files:
 
             doc_type = detect_document_type(full_text, pdf_file.name)
             documents = create_adaptive_chunks(
-                full_text, doc_type, pdf_file.name, filehash)
+                full_text, doc_type, pdf_file.name, filehash
+            )
 
             # IDs por chunk para poder borrarlos después
             ids = [f"{filehash}-{i}" for i in range(len(documents))]
@@ -377,6 +418,7 @@ if uploaded_files:
                 )
             else:
                 st.session_state.vectorstore.add_documents(documents, ids=ids)
+                # Si usas persistencia, puedes activar el persist aquí:
                 # if CHROMA_PERSIST_DIR:
                 #     st.session_state.vectorstore.persist()
 
