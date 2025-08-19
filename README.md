@@ -19,14 +19,14 @@
 <h2>🛠️ Instalación y Ejecución (solo Docker)</h2>
 
 <h3>1) Clonar el repositorio</h3>
-<pre><code>git clone &lt;tu-repositorio&gt;
+<pre><code>git clone &lt;Link del repo&gt;
 cd copiloto_pdfs
 </code></pre>
 
 <h3>2) Construir las imágenes</h3>
 <pre><code>docker compose build
 </code></pre>
-<p><em>Nota:</em> La primera vez puede demorar porque se instalan todas las dependencias dentro de la imagen. Las siguientes veces será mucho más rápido gracias a la caché de Docker.</p>
+<p><em>Nota:</em> La primera vez puede demorar porque se instalan todas las dependencias dentro de la imagen. Las siguientes veces será mucho más rápido gracias a la caché de Docker. Recomiendo tener la App de Docker abierta.</p>
 
 <h3>3) Levantar servicios</h3>
 <pre><code>docker compose up -d
@@ -177,14 +177,6 @@ docker compose logs -f ollama
   <li><strong>RAG Engine (LangChain)</strong>: Orquestación del flujo de Retrieval-Augmented Generation</li>
 </ul>
 
-<h3>Ventajas de esta Arquitectura</h3>
-<ul>
-  <li><strong>Local y Privado</strong>: Todo se ejecuta localmente sin dependencias externas</li>
-  <li><strong>Escalable</strong>: Arquitectura modular permite reemplazar componentes fácilmente</li>
-  <li><strong>Eficiente</strong>: RAG optimiza respuestas usando contexto relevante del PDF</li>
-  <li><strong>Contenerizada</strong>: Fácil despliegue y reproducción del entorno</li>
-</ul>
-
 <h2>❓Preguntas frecuentes</h2>
 <ul>
   <li><strong>¿Por qué tarda tanto la primera vez?</strong><br>
@@ -197,6 +189,7 @@ docker compose logs -f ollama
 docker compose up -d
 </code></pre>
   </li>
+  <li><strong>¿Por qué la app se demora tanto en enviar mensajes? </strong> <br> Es un problema común que noté al momento de dockerizar la aplicación. Puede ser que el modelo de lenguaje es muy lento o se demora haciendo la solicitud al llm.</li>
 </ul>
 
 <h2>📚 Tecnologías</h2>
@@ -287,4 +280,4 @@ docker compose up -d
 </ul>
 
 <h2>🤝 Contribuciones</h2>
-<p>¡Las contribuciones son bienvenidas! Puedes hacer Fork y aportar, Este es un prototipo por lo que puede que continúe este proyecto para un portafolio más robusto.</p>
+<p>¡Las contribuciones son bienvenidas! Puedes hacer Fork y aportar, Este es un prototipo por lo que puede que continúe este proyecto para un portafolio más robusto. Gracias por revisar mi proyecto :)</p>
