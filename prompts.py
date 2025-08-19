@@ -5,64 +5,31 @@ from typing import List
 
 def build_summary_prompt(text: str, doc_type: str) -> str:
     """
-    Devuelve el prompt de resumen según el tipo de documento.
+    Devuelve el prompt de resumen optimizado para todos los tipos de documento.
     Recorta el texto a ~3000 chars para mantenerlo ágil.
     """
     text_head = (text or "")[:3000]
 
-    if doc_type == 'guion_pelicula':
-        head = """
-        Eres un experto en análisis de guiones cinematográficos. 
-        Analiza este guion y proporciona:
+    # Prompt unificado y optimizado para todos los tipos
+    head = """
+    Eres un experto en análisis de documentos. Analiza este documento y proporciona SOLO:
 
-        1. Tipo de documento: Guion cinematográfico
-        2. Título/Historia
-        3. Género
-        4. Resumen de trama (2–3 oraciones)
-        5. Personajes principales (3–4)
-        6. Estructura (escenas/actos)
-        """
-    elif doc_type == 'articulo_academico':
-        head = """
-        Eres un experto en análisis de artículos académicos.
-        Analiza este artículo y proporciona:
+    1. Tipo de Documento: [Especifica el tipo exacto]
+    2. Descripción General: [Máximo 400 caracteres - explica brevemente de qué trata el documento]
+    3. Palabras Clave: [5 palabras clave separadas por comas]
 
-        1. Tipo de documento: Artículo académico
-        2. Título
-        3. Área de estudio
-        4. Objetivo
-        5. Metodología
-        6. Hallazgos clave (2–3)
-        """
-    elif doc_type == 'curriculum_vitae':
-        head = """
-        Eres un experto en análisis de currículos.
-        Analiza este CV y proporciona:
-
-        1. Tipo de documento: Curriculum Vitae
-        2. Profesión principal
-        3. Años de experiencia
-        4. Educación (nivel más alto)
-        5. Habilidades clave (3–4)
-        6. Perfil profesional (1–2 oraciones)
-        """
-    else:
-        head = """
-        Eres un asistente que analiza documentos.
-        Analiza este documento y proporciona:
-
-        1. Tipo de documento
-        2. Propósito
-        3. Contenido principal
-        4. Estructura
-        5. Audiencia objetivo
-        """
+    IMPORTANTE:
+    - La descripción debe ser clara y concisa
+    - Máximo 400 caracteres en la descripción
+    - Solo 5 palabras clave relevantes
+    - Formato simple y directo
+    """
 
     tail = f"""
     Texto del documento:
     {text_head}...
 
-    Resumen estructurado:
+    Resumen optimizado:
     """
 
     return dedent(head).strip() + "\n\n" + dedent(tail).strip()
@@ -81,8 +48,9 @@ def build_chat_prompt(user_query: str, relevant_chunks: List) -> str:
     - Responde en español de manera clara y estructurada. Si en el documento hay palabras en inglés, debes responder todo en español y traducir las palabras.
     - Usa bullets para organizar la información.
     - Si la información se repite en varios chunks, haz un resumen coherente y humano.
-    - Si no hay información suficiente, responde: "No se encontró evidencia en los documentos."
+    - Si no hay información suficiente, responde: "No se encontró evidencia en los documentos." a menos de que puedes inferir la información a partir de los chunks.
     - Mantén el contexto y la coherencia en tu respuesta.
+    - Sé breve, y no seas redundante.
 
     Pregunta del usuario: {user_query}
 

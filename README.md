@@ -4,7 +4,7 @@
 <h2>🚀 Características</h2>
 <ul>
   <li><strong>Procesamiento de PDFs</strong>: extracción de texto y chunking</li>
-  <li><strong>IA local</strong>: modelo <code>llama3:8b</code> servido por Ollama</li>
+  <li><strong>IA local</strong>: modelo <code>llama3:3b</code> servido por Ollama</li>
   <li><strong>RAG</strong>: búsqueda semántica con Chroma</li>
   <li><strong>Interfaz Web</strong>: app Streamlit en el puerto 8501</li>
   <li><strong>Contenerización</strong>: entorno reproducible con Docker</li>
@@ -38,7 +38,7 @@ cd copiloto_pdfs
 </ul>
 
 <h3>4) Descargar el modelo (solo primera vez)</h3>
-<pre><code>docker compose exec ollama ollama pull llama3:8b
+<pre><code>docker compose exec ollama ollama pull llama3:3b
 </code></pre>
 <p><em>Importante:</em> La descarga del modelo puede tardar varios minutos la primera vez. Una vez descargado, quedará cacheado y los arranques posteriores serán mucho más rápidos.</p>
 
@@ -69,7 +69,7 @@ cd copiloto_pdfs
 </code></pre>
   </li>
   <li>Probar el modelo desde el contenedor de Ollama:
-    <pre><code>docker compose exec ollama ollama run llama3:8b "Hola, ¿cómo estás?"
+    <pre><code>docker compose exec ollama ollama run llama3:3b "Hola, ¿cómo estás?"
 </code></pre>
   </li>
 </ul>
@@ -91,7 +91,7 @@ docker compose logs -f ollama
 <h2>❓Preguntas frecuentes</h2>
 <ul>
   <li><strong>¿Por qué tarda tanto la primera vez?</strong><br>
-    Porque Docker construye la imagen (instala dependencias) y Ollama descarga el modelo <code>llama3:8b</code>. Después de esa primera preparación, los arranques siguientes usan la caché y son mucho más rápidos.</li>
+    Porque Docker construye la imagen (instala dependencias) y Ollama descarga el modelo <code>llama3:3b</code>. Después de esa primera preparación, los arranques siguientes usan la caché y son mucho más rápidos.</li>
   <li><strong>¿Necesito Python/venv en mi máquina?</strong><br>
     No. Todo corre dentro de los contenedores.</li>
   <li><strong>¿Cómo actualizo el código?</strong><br>
@@ -108,7 +108,7 @@ docker compose up -d
   <li><strong>LangChain</strong> — orquestación de LLM + RAG</li>
   <li><strong>ChromaDB</strong> — vector store</li>
   <li><strong>Sentence Transformers</strong> — embeddings</li>
-  <li><strong>Ollama</strong> — LLM local (modelo <code>llama3:8b</code>)</li>
+  <li><strong>Ollama</strong> — LLM local (modelo <code>llama3:3b</code>)</li>
   <li><strong>Docker &amp; Docker Compose</strong> — despliegue y orquestación</li>
 </ul>
 
@@ -118,6 +118,6 @@ docker compose up -d
   <li><strong>LangChain</strong> — Framework estándar para RAG con integración con Ollama</li>
   <li><strong>ChromaDB</strong> — Vector store ligero y eficiente para aplicaciones locales</li>
   <li><strong>Sentence Transformers</strong> — Embeddings de alta calidad en español/inglés, optimizados para RAG</li>
-  <li><strong>Ollama</strong> — LLM local sin dependencias externas, escogí el modelo llama3:8b por el balance calidad/velocidad</li>
+  <li><strong>Ollama</strong> — LLM local sin dependencias externas, escogí el modelo llama3:3b por el balance calidad/velocidad</li>
   <li><strong>Docker</strong> — Para reproducir el entorno en otras máquinas.</li>
 </ul>
