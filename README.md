@@ -88,6 +88,103 @@ docker compose logs -f ollama
 └── README.md              # Este archivo
 </code></pre>
 
+<h2>🏗️ Arquitectura del Sistema</h2>
+
+<h3>Diagrama de Arquitectura</h3>
+<pre><code>┌─────────────────────────────────────────────────────────────────┐
+│                        USUARIO                                  │
+└─────────────────────┬───────────────────────────────────────────┘
+                      │
+                      ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    NAVEGADOR WEB                                │
+│                    (localhost:8501)                            │
+└─────────────────────┬───────────────────────────────────────────┘
+                      │ HTTP/WebSocket
+                      ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    CONTAINER: APP                              │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                 STREAMLIT APP                           │   │
+│  │  ┌─────────────────┐  ┌─────────────────────────────┐  │   │
+│  │  │   INTERFAZ      │  │      PROCESAMIENTO          │  │   │
+│  │  │   DE USUARIO    │  │         DE PDFs             │  │   │
+│  │  │                 │  │                             │  │   │
+│  │  │ • Upload PDF    │  │ • Extracción de texto       │  │   │
+│  │  │ • Chat UI       │  │ • Chunking inteligente      │  │   │
+│  │  │ • Historial     │  │ • Generación embeddings     │  │   │
+│  │  └─────────────────┘  └─────────────────────────────┘  │   │
+│  │                                                         │   │
+│  │  ┌─────────────────────────────────────────────────────┐  │   │
+│  │  │              LANGCHAIN ORCHESTRATOR                 │  │   │
+│  │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  │   │
+│  │  │  │   RAG       │  │   CHAIN     │  │   OUTPUT    │  │   │
+│  │  │  │  ENGINE     │  │  MANAGER    │  │  PROCESSOR  │  │   │
+│  │  │  └─────────────┘  └─────────────┘  └─────────────┘  │   │
+│  │  └─────────────────────────────────────────────────────┘  │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└─────────────────────┬───────────────────────────────────────────┘
+                      │
+                      ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    CONTAINER: OLLAMA                           │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                 LLM SERVICE                             │   │
+│  │  ┌─────────────────────────────────────────────────────┐  │   │
+│  │  │              LLAMA3:3B MODEL                        │  │   │
+│  │  │  • Procesamiento de consultas                       │  │   │
+│  │  │  • Generación de respuestas                         │  │   │
+│  │  │  • Contexto de conversación                         │  │   │
+│  │  └─────────────────────────────────────────────────────┘  │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└─────────────────────┬───────────────────────────────────────────┘
+                      │
+                      ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    VECTOR STORE                               │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                    CHROMADB                             │   │
+│  │  ┌─────────────────┐  ┌─────────────────────────────┐  │   │
+│  │  │   EMBEDDINGS    │  │      METADATA               │  │   │
+│  │  │   STORAGE       │  │      STORAGE                 │  │   │
+│  │  │                 │  │                             │  │   │
+│  │  │ • Vector chunks │  │ • Información del PDF        │  │   │
+│  │  │ • Similarity    │  │ • Timestamps                 │  │   │
+│  │  │   search        │  │ • Chunk indices              │  │   │
+│  │  └─────────────────┘  └─────────────────────────────┘  │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└───────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ FLUJO DE DATOS │
+│ │
+│ 1. Usuario sube PDF → Streamlit │
+│ 2. Streamlit → Procesamiento → Chunks + Embeddings │
+│ 3. Embeddings → ChromaDB (Vector Store) │
+│ 4. Usuario hace pregunta → Streamlit │
+│ 5. Streamlit → RAG Engine → ChromaDB (búsqueda semántica) │
+│ 6. RAG Engine → Ollama (LLM) con contexto │
+│ 7. Ollama → Respuesta → Streamlit → Usuario │
+└─────────────────────────────────────────────────────────────────┘
+</code></pre>
+
+<h3>Componentes Principales</h3>
+<ul>
+  <li><strong>Frontend (Streamlit)</strong>: Interfaz de usuario para upload y chat</li>
+  <li><strong>Backend (Python)</strong>: Lógica de procesamiento y orquestación</li>
+  <li><strong>LLM Service (Ollama)</strong>: Modelo de lenguaje local para generación de respuestas</li>
+  <li><strong>Vector Database (ChromaDB)</strong>: Almacenamiento de embeddings para búsqueda semántica</li>
+  <li><strong>RAG Engine (LangChain)</strong>: Orquestación del flujo de Retrieval-Augmented Generation</li>
+</ul>
+
+<h3>Ventajas de esta Arquitectura</h3>
+<ul>
+  <li><strong>Local y Privado</strong>: Todo se ejecuta localmente sin dependencias externas</li>
+  <li><strong>Escalable</strong>: Arquitectura modular permite reemplazar componentes fácilmente</li>
+  <li><strong>Eficiente</strong>: RAG optimiza respuestas usando contexto relevante del PDF</li>
+  <li><strong>Contenerizada</strong>: Fácil despliegue y reproducción del entorno</li>
+</ul>
+
 <h2>❓Preguntas frecuentes</h2>
 <ul>
   <li><strong>¿Por qué tarda tanto la primera vez?</strong><br>
@@ -121,3 +218,73 @@ docker compose up -d
   <li><strong>Ollama</strong> — LLM local sin dependencias externas, escogí el modelo llama3:3b por el balance calidad/velocidad</li>
   <li><strong>Docker</strong> — Para reproducir el entorno en otras máquinas.</li>
 </ul>
+
+<h2>⚠️ Limitaciones Actuales</h2>
+<ul>
+  <li><strong>Interfaz Visual</strong>: La interfaz actual es funcional pero básica, necesita mejoras en diseño y UX para verse más profesional e intuitivo de usar.</li>
+  <li><strong>Rendimiento</strong>: El procesamiento de PDFs y las respuestas del LLM pueden ser lentas, especialmente con archivos grandes.</li>
+  <li><strong>Persistencia</strong>: No hay sistema de usuarios ni memoria de archivos procesados anteriormente</li>
+  <li><strong>Seguridad</strong>: Falta implementar autenticación, autorización y validación de archivos</li>
+  <li><strong>Escalabilidad</strong>: Limitado a un solo usuario por sesión.</li>
+  <li><strong>Modelo LLM</strong>: El modelo llama3:3b es rápido (lo probé con el modelo estandar) pero puede tener limitaciones en calidad de respuestas complejas</li>
+</ul>
+
+<h2>🚀 Roadmap de Mejoras Futuras</h2>
+
+<h3>🎨 Fase 1: Mejoras de Interfaz y UX</h3>
+<ul>
+  <li>Rediseño completo de la interfaz con componentes modernos y responsive</li>
+  <li>Implementación de temas claro/oscuro</li>
+  <li>Mejoras en la visualización de PDFs (zoom, navegación por páginas)</li>
+  <li>Indicadores de progreso y feedback visual mejorado</li>
+  <li>Historial de conversaciones en la misma sesión</li>
+</ul>
+
+<h3>⚡ Fase 2: Optimización de Rendimiento</h3>
+<ul>
+  <li>Probar otros modelos para evaluar rendimiento</li>
+  <li>Implementación de procesamiento asíncrono de PDFs</li>
+  <li>Optimización del chunking y embeddings para mayor velocidad</li>
+  <li>Cache de embeddings para archivos procesados previamente</li>
+  <li>Procesamiento en lotes para múltiples archivos</li>
+  <li>Evaluación de modelos LLM más rápidos manteniendo calidad</li>
+  <li>Implementación de framework de testing robusto (pytest, unittest) con tests unitarios, de integración y de rendimiento</li>
+</ul>
+
+<h3>👥 Fase 3: Sistema de Usuarios y Persistencia</h3>
+<ul>
+  <li>Sistema de autenticación y registro de usuarios</li>
+  <li>Base de datos para almacenar historial de archivos y conversaciones</li>
+  <li>Dashboard personalizado con estadísticas de uso</li>
+  <li>Compartir archivos y conversaciones entre usuarios</li>
+  <li>Sistema de favoritos y etiquetas para organizar contenido</li>
+</ul>
+
+<h3>🔒 Fase 4: Seguridad y Robustez</h3>
+<ul>
+  <li>Validación y sanitización de archivos PDF</li>
+  <li>Rate limiting para prevenir abuso</li>
+  <li>Encriptación de datos sensibles</li>
+  <li>Auditoría de acceso y logs de seguridad</li>
+</ul>
+
+<h3>🌐 Fase 5: Funcionalidades Avanzadas</h3>
+<ul>
+  <li>API REST para integración con otros sistemas</li>
+  <li>Webhooks para notificaciones</li>
+  <li>Integración con sistemas de almacenamiento en la nube</li>
+  <li>Análisis avanzado de documentos (extracción de tablas, imágenes)</li>
+  <li>Sistema de plugins para funcionalidades personalizables</li>
+</ul>
+
+<h3>📊 Fase 6: Monitoreo y Analytics</h3>
+<ul>
+  <li>Dashboard de métricas de rendimiento</li>
+  <li>Análisis de uso y patrones de consulta</li>
+  <li>Sistema de alertas para problemas de rendimiento</li>
+  <li>Reportes automáticos de calidad de respuestas</li>
+  <li>Integración con herramientas de observabilidad</li>
+</ul>
+
+<h2>🤝 Contribuciones</h2>
+<p>¡Las contribuciones son bienvenidas! Puedes hacer Fork y aportar, Este es un prototipo por lo que puede que continúe este proyecto para un portafolio más robusto.</p>

@@ -8,6 +8,8 @@ def setup_test_environment():
     os.environ['OLLAMA_BASE_URL'] = 'http://localhost:11434'
     os.environ['OLLAMA_MODEL'] = 'llama3:8b'
     os.environ['CHROMA_PERSIST_DIR'] = ''
+
+
 SAMPLE_TEXTS = {
     'guion_pelicula': """
     INT. OFICINA - DÍA
@@ -24,7 +26,7 @@ SAMPLE_TEXTS = {
     MARÍA
     ¿Qué pasó?
     """,
-    
+
     'curriculum_vitae': """
     MAURICIO ARRIETA
     
@@ -39,7 +41,7 @@ SAMPLE_TEXTS = {
     - Python, JavaScript, SQL
     - Machine Learning, Data Analysis
     """,
-    
+
     'brochure_educativo': """
     DIPLOMADO EN INTELIGENCIA ARTIFICIAL
     

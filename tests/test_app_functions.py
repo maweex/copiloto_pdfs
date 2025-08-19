@@ -7,6 +7,7 @@ from test_config import setup_test_environment, SAMPLE_TEXTS
 
 setup_test_environment()
 
+
 class MockStreamlit:
     def __init__(self):
         self.session_state = {}
@@ -28,6 +29,7 @@ class MockStreamlit:
         self.caption = Mock()
         self.rerun = Mock()
 
+
 class MockDocument:
     def __init__(self, page_content, metadata):
         self.page_content = page_content
@@ -46,6 +48,7 @@ class MockVectorStore:
 
     def delete(self, ids=None, where=None):
         pass
+
 
 class TestAppFunctions(unittest.TestCase):
 
