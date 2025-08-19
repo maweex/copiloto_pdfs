@@ -263,6 +263,7 @@ docker compose up -d
 
 <h3>🌐 Fase 5: Funcionalidades Avanzadas</h3>
 <ul>
+  <li>Separación de backend y frontend para mejor escalabilidad y mantenimiento. Quizás usar FastAPI ya que se integra bien con proyectos de python.</li>
   <li>API REST para integración con otros sistemas</li>
   <li>Webhooks para notificaciones</li>
   <li>Integración con sistemas de almacenamiento en la nube</li>
